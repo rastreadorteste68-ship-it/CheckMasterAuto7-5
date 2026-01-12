@@ -1,0 +1,7 @@
+{
+  "name": "CheckMasterAuto7,5",
+  "description": "Professional vehicle inspection PWA with AI-powered OCR and checklist management.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
