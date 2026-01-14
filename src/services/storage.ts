@@ -1,5 +1,5 @@
 
-import { ChecklistTemplate } from "../types";
+import { ChecklistTemplate, ServiceOrder } from "../types";
 
 const PREFIX = 'checkmaster_';
 
@@ -110,10 +110,18 @@ export const storage = {
     }
     return false;
   },
-  getOrders: () => storage.get('orders', []),
-  saveOrder: (order: any) => {
+  getOrders: (): ServiceOrder[] => storage.get('orders', []),
+  saveOrder: (order: ServiceOrder) => {
     const orders = storage.getOrders();
-    orders.push(order);
+    const index = orders.findIndex(o => o.id === order.id);
+    
+    if (index >= 0) {
+      // Update existing order
+      orders[index] = order;
+    } else {
+      // Create new order
+      orders.push(order);
+    }
     storage.set('orders', orders);
   }
 };

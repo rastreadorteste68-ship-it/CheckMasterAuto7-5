@@ -52,6 +52,7 @@ const Services: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const templateId = searchParams.get('run');
+  const editOrderId = searchParams.get('editOrder');
 
   const [view, setView] = useState<'menu' | 'builder' | 'runner'>('menu');
   const [templates, setTemplates] = useState<ChecklistTemplate[]>([]);
@@ -64,6 +65,9 @@ const Services: React.FC = () => {
   const [vehicleType, setVehicleType] = useState<'car' | 'bike' | 'truck' | 'machine' | null>(null);
   const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
+  
+  // Stores the ID of the order being edited, if any
+  const [currentOrderId, setCurrentOrderId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [scanningFieldId, setScanningFieldId] = useState<string | null>(null);
@@ -74,11 +78,43 @@ const Services: React.FC = () => {
   useEffect(() => {
     const ts = storage.getTemplates();
     setTemplates(ts);
-    if (templateId) {
+    
+    // Check if we are editing an existing order
+    if (editOrderId) {
+      const orders = storage.getOrders();
+      const orderToEdit = orders.find(o => o.id === editOrderId);
+      
+      if (orderToEdit) {
+        // Reconstruct template from order fields
+        const tempTemplate: ChecklistTemplate = {
+          id: orderToEdit.templateId,
+          name: orderToEdit.templateName,
+          description: '',
+          fields: orderToEdit.fields,
+          isFavorite: false // Doesn't matter for runner context
+        };
+        
+        // Extract values from fields
+        const values: Record<string, any> = {};
+        orderToEdit.fields.forEach(f => {
+          values[f.id] = f.value;
+        });
+
+        setCurrentOrderId(orderToEdit.id);
+        setActiveTemplate(tempTemplate);
+        setFieldValues(values);
+        setClientName(orderToEdit.clientName);
+        setSelectedBrand(orderToEdit.vehicle.marca);
+        setSelectedModel(orderToEdit.vehicle.modelo);
+        setView('runner');
+      }
+    } 
+    // Or starting a new one from template
+    else if (templateId) {
       const found = ts.find(t => t.id === templateId);
       if (found) startInspection(found);
     }
-  }, [templateId]);
+  }, [templateId, editOrderId]);
 
   const handleCreateTemplate = () => {
     setActiveTemplate({ id: Date.now().toString(), name: '', description: '', fields: [], isFavorite: false });
@@ -160,9 +196,10 @@ const Services: React.FC = () => {
   };
 
   const startInspection = (template: ChecklistTemplate) => {
+    setCurrentOrderId(null); // Reset order ID for new inspection
     setActiveTemplate(JSON.parse(JSON.stringify(template)));
     setFieldValues({});
-    setClientName('');
+    setClientName(template.name);
     setVehicleType(null);
     setSelectedBrand('');
     setSelectedModel('');
@@ -179,26 +216,37 @@ const Services: React.FC = () => {
   const finishInspection = () => {
     if (!activeTemplate || !clientName) return alert("Informe o cliente.");
     
+    // Helper to find value by field type
+    const getValueByType = (type: FieldType) => {
+      const field = activeTemplate.fields.find(f => f.type === type);
+      return field ? fieldValues[field.id] : undefined;
+    };
+
+    const placaValue = getValueByType('ai_placa');
+    const brandModelValue = getValueByType('ai_brand_model');
+    const imeiValue = getValueByType('ai_imei');
+    
     try {
       const order: ServiceOrder = {
-        id: Date.now().toString(),
+        id: currentOrderId || Date.now().toString(), // Use existing ID if editing
         templateId: activeTemplate.id,
         templateName: activeTemplate.name,
         clientName: clientName,
         vehicle: { 
-          placa: String(fieldValues['ai_placa'] || ''), 
+          placa: String(placaValue || ''), 
           marca: selectedBrand || '', 
-          modelo: selectedModel || String(fieldValues['ai_brand_model'] || ''), 
-          imei: Array.isArray(fieldValues['ai_imei']) ? fieldValues['ai_imei'] : [String(fieldValues['ai_imei'] || '')]
+          modelo: selectedModel || String(brandModelValue || ''), 
+          imei: Array.isArray(imeiValue) ? imeiValue : [String(imeiValue || '')]
         },
         fields: activeTemplate.fields.map(f => ({ ...f, value: fieldValues[f.id] })),
         totalValue: calculateTotal(),
         status: 'completed',
-        date: new Date().toISOString()
+        date: currentOrderId ? (storage.getOrders().find(o => o.id === currentOrderId)?.date || new Date().toISOString()) : new Date().toISOString()
       };
       
       storage.saveOrder(order);
-      navigate('/');
+      // Redirect to finance to see the updated/new order
+      navigate('/finance?tab=individual');
     } catch (e) {
       alert("Erro ao salvar vistoria.");
     }
@@ -518,11 +566,11 @@ const Services: React.FC = () => {
 
         <section className="bg-white p-8 sm:p-10 rounded-[3.5rem] border border-slate-100 shadow-sm space-y-6">
            <div className="space-y-3">
-             <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest ml-4">Nome do Cliente / Empresa Responsável</label>
-             <input className="w-full bg-[#F8FAFC] border-none rounded-[2rem] py-6 px-10 text-slate-900 font-black text-2xl focus:ring-4 focus:ring-indigo-100 outline-none shadow-inner" value={clientName} onChange={e => setClientName(e.target.value)} placeholder="Cliente..." />
-             {clientName && (
-                <div className="px-8 py-3 bg-[#EEF2FF] rounded-[1.5rem] border-l-[8px] border-[#818CF8] text-[11px] font-black text-[#4F46E5] uppercase shadow-sm">Cliente Ativo: {clientName}</div>
-             )}
+             <div className="flex items-center justify-between">
+               <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest ml-4">Nome do Cliente / Empresa Responsável</label>
+               {currentOrderId && <span className="bg-amber-100 text-amber-600 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest">Editando</span>}
+             </div>
+             <input className="w-full bg-[#F8FAFC] border-none rounded-[2rem] py-6 px-10 text-rose-500 font-black text-2xl focus:ring-4 focus:ring-indigo-100 outline-none shadow-inner" value={clientName} onChange={e => setClientName(e.target.value)} placeholder="Cliente..." />
            </div>
         </section>
 
@@ -615,7 +663,7 @@ const Services: React.FC = () => {
         
         <div className="fixed bottom-0 left-0 right-0 p-6 sm:p-10 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent z-[70] max-w-4xl mx-auto flex justify-center">
           <button onClick={finishInspection} className="w-full h-[80px] rounded-[2.5rem] bg-[#4F46E5] text-white font-black shadow-[0_30px_60px_rgba(79,70,229,0.3)] active:scale-95 transition-all flex items-center justify-center gap-4 text-xl animate-slide-up hover:bg-[#4338ca]">
-            <CheckCircle2 size={32} /> CONCLUIR VISTORIA PRO
+            <CheckCircle2 size={32} /> {currentOrderId ? 'ATUALIZAR VISTORIA' : 'CONCLUIR VISTORIA PRO'}
           </button>
         </div>
       </div>
